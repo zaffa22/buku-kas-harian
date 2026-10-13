@@ -8,6 +8,9 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: buku-kas-harian-app
     steps:
       - uses: actions/checkout@v4
 
@@ -34,7 +37,7 @@ jobs:
         run: npx cap sync android
 
       - name: Bangun APK
-        working-directory: android
+        working-directory: buku-kas-harian-app/android
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug
@@ -43,5 +46,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: buku-kas-harian-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: buku-kas-harian-app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
