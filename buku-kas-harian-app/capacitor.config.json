@@ -1,0 +1,8 @@
+{
+  "appId": "id.bukukas.harian",
+  "appName": "Buku Kas Harian",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
