@@ -171,6 +171,9 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
 .facts dd{margin:0;font-weight:600;text-align:right}
 .sectionhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
 .gap{margin-top:22px}
+textarea.input{resize:vertical;min-height:84px;line-height:1.45}
+.stack{display:flex;flex-direction:column;gap:14px;margin-top:12px}
+.quote{border-left:3px solid var(--ink);padding:8px 12px;background:var(--surface-2);font-size:.875rem;border-radius:0 4px 4px 0;margin-top:12px;overflow-wrap:anywhere}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:4px;max-width:calc(100% - 32px);font-weight:600;z-index:20}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 </style>
@@ -271,6 +274,7 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
           <button class="chip" type="button" data-filter="pokok" aria-pressed="false">Pokok</button>
           <button class="chip" type="button" data-filter="gaya" aria-pressed="false">Gaya Hidup</button>
           <button class="chip" type="button" data-filter="kewajiban" aria-pressed="false">Kewajiban</button>
+          <button class="chip" type="button" data-filter="none" aria-pressed="false">Tanpa kategori</button>
           <button class="chip" type="button" data-filter="in" aria-pressed="false">Pemasukan</button>
         </div>
         <div class="chips" id="mchips" role="group" aria-label="Saring metode">
@@ -298,6 +302,17 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
         </div>
 
         <div class="gap" id="sumBottom"></div>
+
+        <div class="gap" id="reflect">
+          <div class="sectionhead"><h2 id="reflectTitle">Refleksi bulan ini</h2><span class="note" id="reflectSaved" aria-live="polite"></span></div>
+          <p class="quote" id="reflectPrev" hidden></p>
+          <div class="stack">
+            <div class="field"><label for="r-good">Apa yang berjalan baik bulan ini?</label><textarea class="input" id="r-good" rows="3" maxlength="600" placeholder="Contoh: bensin terkontrol, jajan tidak berlebih"></textarea></div>
+            <div class="field"><label for="r-fix">Apa yang mau diperbaiki?</label><textarea class="input" id="r-fix" rows="3" maxlength="600" placeholder="Contoh: jajan harian terlalu sering"></textarea></div>
+            <div class="field"><label for="r-goal">Target untuk bulan depan</label><textarea class="input" id="r-goal" rows="3" maxlength="600" placeholder="Contoh: jajan maksimal Rp 10.000 per hari"></textarea></div>
+            <div class="actions"><button class="btn ghost" type="button" id="reflectFill">Isi dari saran otomatis</button></div>
+          </div>
+        </div>
         <textarea class="input" id="copyFallback" rows="9" readonly hidden style="margin-top:12px" aria-label="Teks ringkasan untuk disalin"></textarea>
       </section>
     </div>
@@ -318,6 +333,8 @@ var CATS={
 var ORDER=['pokok','gaya','kewajiban'];
 var METHODS={tunai:'Tunai',ewallet:'E-wallet',bri:'BRI',sinarmas:'Sinarmas'};
 var MORDER=['tunai','ewallet','bri','sinarmas'];
+function catLabel(t){return t.type==='in'?'Pemasukan':(CATS[t.cat]?CATS[t.cat].label:'Tanpa kategori');}
+function catVar(t){return t.type==='in'?'--in':(CATS[t.cat]?CATS[t.cat].v:'--muted');}
 var DEF_T={pokok:50,gaya:20,kewajiban:20};
 var $=function(id){return document.getElementById(id);};
 var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
@@ -336,7 +353,7 @@ var shiftMonth=function(k,n){var p=k.split('-').map(Number);return monthKey(new 
 var longDate=function(s){return parse(s).toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});};
 var shortDate=function(s){return parse(s).toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short'});};
 
-var S={tx:[],targets:Object.assign({},DEF_T),month:monthKey(new Date()),tab:'catat',filter:'all',mfilter:'all',editing:null,armed:null,mode:'pending',col:null,sampleOff:false,plan:''};
+var S={tx:[],targets:Object.assign({},DEF_T),month:monthKey(new Date()),tab:'catat',filter:'all',mfilter:'all',reflect:{},lastAdv:null,lastLimits:null,editing:null,armed:null,mode:'pending',col:null,sampleOff:false,plan:''};
 var sampleCache=null;
 
 function sampleTx(){
@@ -374,22 +391,23 @@ function effective(){return usingSample()?sampleTx():S.tx;}
 function loadLocal(){
   try{
     var raw=localStorage.getItem(KEY);
-    if(raw){var o=JSON.parse(raw);S.tx=Array.isArray(o.tx)?o.tx:[];S.targets=Object.assign({},DEF_T,o.targets||{});}
+    if(raw){var o=JSON.parse(raw);S.tx=Array.isArray(o.tx)?o.tx:[];S.targets=Object.assign({},DEF_T,o.targets||{});S.reflect=(o.reflect&&typeof o.reflect==='object')?o.reflect:{};}
   }catch(e){}
 }
 function saveLocal(){
-  try{localStorage.setItem(KEY,JSON.stringify({tx:S.tx,targets:S.targets}));}
+  try{localStorage.setItem(KEY,JSON.stringify({tx:S.tx,targets:S.targets,reflect:S.reflect}));}
   catch(e){toast('Penyimpanan browser tidak tersedia. Data hilang saat halaman ditutup.');}
 }
 function onSnap(snap){
-  var tx=[],targets=null;
+  var tx=[],targets=null,refl={};
   snap.docs.forEach(function(d){
     if(!d.exists)return;
     var v=d.data();
     if(d.id==='settings'){if(v&&v.targets)targets=v.targets;}
+    else if(d.id.indexOf('reflect-')===0){if(v)refl[d.id.slice(8)]=v;}
     else if(v&&v.date&&v.type){tx.push(Object.assign({},v,{id:d.id}));}
   });
-  S.tx=tx;
+  S.tx=tx;S.reflect=refl;
   if(tx.length)S.sampleOff=true;
   if(targets)S.targets=Object.assign({},DEF_T,targets);
   render();syncTargetInputs();
@@ -450,7 +468,7 @@ function compute(list,key){
   Object.keys(perDay).forEach(function(d){if(!busiest||perDay[d]>busiest.amount)busiest={date:d,amount:perDay[d]};});
   var small=out.filter(function(t){return t.amount<30000;});
   var big=out.slice().sort(function(a,b){return b.amount-a.amount;}).slice(0,3);
-  return {out:out,income:sum(inn),expense:sum(out),by:by,byM:byM,top:top,daysLogged:Object.keys(days).length,busiest:busiest,weekend:weekend,small:{n:small.length,sum:sum(small)},big:big,count:out.length};
+  return {out:out,income:sum(inn),expense:sum(out),by:by,byM:byM,unc:sum(out)-by.pokok-by.gaya-by.kewajiban,top:top,daysLogged:Object.keys(days).length,busiest:busiest,weekend:weekend,small:{n:small.length,sum:sum(small)},big:big,count:out.length};
 }
 function elapsedDays(key){
   var now=new Date(),cur=monthKey(now),p=key.split('-').map(Number);
@@ -502,6 +520,7 @@ function buildAdvice(c,prev,key){
   if(el>=7&&c.daysLogged/el<0.5){
     a.push({lv:'warn',t:'Pencatatan bolong',x:'Kamu mencatat di '+c.daysLogged+' dari '+el+' hari. Catat tiap malam supaya ringkasan mencerminkan pengeluaran sebenarnya.'});
   }
+  if(c.unc>0)a.push({lv:'info',t:'Ada pengeluaran tanpa kategori',x:idr(c.unc)+' ('+pct(c.unc,c.expense)+'% pengeluaran) belum punya kategori, jadi belum dinilai terhadap target. Ketuk Ubah di Riwayat untuk memilih kategorinya.'});
   var rank={bad:0,warn:1,info:2,ok:3};
   a.sort(function(x,y){return rank[x.lv]-rank[y.lv];});
   return a;
@@ -520,7 +539,7 @@ function renderStrip(c){
 function renderHistory(){
   var key=S.month,list=effective().filter(function(t){return t.date.slice(0,7)===key;});
   if(S.filter==='in')list=list.filter(function(t){return t.type==='in';});
-  else if(S.filter!=='all')list=list.filter(function(t){return t.type==='out'&&t.cat===S.filter;});
+  else if(S.filter!=='all')list=list.filter(function(t){return t.type==='out'&&(t.cat||'none')===S.filter;});
   if(S.mfilter!=='all')list=list.filter(function(t){return (t.method||'tunai')===S.mfilter;});
   var el=$('history');
   if(!list.length){el.innerHTML='<p class="empty">Belum ada transaksi'+(S.filter==='all'?'':' pada filter ini')+' di '+esc(monthLabel(key))+'.</p>';return;}
@@ -531,8 +550,8 @@ function renderHistory(){
     var o=sum(g.filter(function(t){return t.type==='out';}));
     var rows=g.map(function(t){
       var isIn=t.type==='in';
-      var color=isIn?'--in':CATS[t.cat].v;
-      var cl=isIn?'Pemasukan':CATS[t.cat].label;
+      var color=catVar(t);
+      var cl=catLabel(t);
       var acts='';
       if(!t.sample){
         var armed=S.armed===t.id;
@@ -556,9 +575,10 @@ function renderSumTop(c,key){
   }
   var T=S.targets,rank=ORDER.slice().sort(function(a,b){return c.by[b]-c.by[a];});
   var top=rank[0],base=c.income>0?c.income:c.expense;
-  var scale=Math.max(base,c.by.pokok,c.by.gaya,c.by.kewajiban);
-  var html='<h2 class="lead"><span class="sq" style="background:var('+CATS[top].v+')"></span>'+CATS[top].label+' jadi pengeluaran terbesar</h2>'+
-    '<p>'+idr(c.by[top])+', atau '+pct(c.by[top],c.expense)+'% dari total pengeluaran '+idr(c.expense)+'.</p>';
+  var scale=Math.max(base,c.by.pokok,c.by.gaya,c.by.kewajiban,c.unc);
+  var html=c.by[top]>0?('<h2 class="lead"><span class="sq" style="background:var('+CATS[top].v+')"></span>'+CATS[top].label+' jadi pengeluaran terbesar</h2>'+
+    '<p>'+idr(c.by[top])+', atau '+pct(c.by[top],c.expense)+'% dari total pengeluaran '+idr(c.expense)+'.</p>'):
+    ('<h2 class="lead"><span class="sq" style="background:var(--muted)"></span>Pengeluaran belum dikategorikan</h2><p>'+idr(c.expense)+' belum punya kategori. Ketuk Ubah di Riwayat untuk memilih kategorinya.</p>');
   rank.forEach(function(k,i){
     var amt=c.by[k],w=amt/scale*100,meta;
     var tick=c.income>0?'<u style="left:'+Math.min(100,(base*T[k]/100)/scale*100).toFixed(2)+'%"></u>':'';
@@ -566,10 +586,11 @@ function renderSumTop(c,key){
       var limit=c.income*T[k]/100;
       meta=pct(amt,c.income)+'% dari pemasukan, target '+T[k]+'%'+(amt>limit?' <span class="over">lewat '+idr(amt-limit)+'</span>':'');
     }else meta=pct(amt,c.expense)+'% dari total pengeluaran';
-    html+='<div class="cat" style="--c:var('+CATS[k].v+')"><div class="cathead"><span class="sq" style="background:var('+CATS[k].v+')"></span><b>'+CATS[k].label+'</b>'+(i===0?'<span class="tag">Terbesar</span>':'')+'<span class="amt">'+num(amt)+'</span></div>'+
+    html+='<div class="cat" style="--c:var('+CATS[k].v+')"><div class="cathead"><span class="sq" style="background:var('+CATS[k].v+')"></span><b>'+CATS[k].label+'</b>'+(i===0&&amt>0?'<span class="tag">Terbesar</span>':'')+'<span class="amt">'+num(amt)+'</span></div>'+
       '<div class="bar" role="img" aria-label="'+CATS[k].label+' '+pct(amt,base)+' persen"><i style="width:'+w.toFixed(2)+'%"></i>'+tick+'</div>'+
       '<p class="catmeta">'+meta+'</p></div>';
   });
+  if(c.unc>0)html+='<div class="cat" style="--c:var(--muted)"><div class="cathead"><span class="sq" style="background:var(--muted)"></span><b>Tanpa kategori</b><span class="amt">'+num(c.unc)+'</span></div><div class="bar" role="img" aria-label="Tanpa kategori"><i style="width:'+(c.unc/scale*100).toFixed(2)+'%"></i></div><p class="catmeta">'+pct(c.unc,c.expense)+'% dari total pengeluaran</p></div>';
   if(c.income>0)html+='<p class="hint" style="margin-top:12px">Garis hitam pada batang menandai target kategori.</p>';
   el.innerHTML=html;
 }
@@ -590,13 +611,13 @@ function planText(c,key,adv,limits){
 }
 function renderSumBottom(c,prev,key){
   var el=$('sumBottom');
-  if(c.expense===0){el.innerHTML='';S.plan='';return;}
+  if(c.expense===0){el.innerHTML='';S.plan='';S.lastAdv=null;S.lastLimits=null;return;}
   var T=S.targets,adv=buildAdvice(c,prev,key),limits=null;
   if(c.income>0){
     var tsum=T.pokok+T.gaya+T.kewajiban;
     limits={rows:ORDER.map(function(k){return {k:k,label:CATS[k].label,now:c.by[k],limit:roundTen(c.income*T[k]/100)};}),rest:roundTen(c.income*Math.max(0,100-tsum)/100)};
   }
-  S.plan=planText(c,key,adv,limits);
+  S.plan=planText(c,key,adv,limits);S.lastAdv=adv;S.lastLimits=limits;
   var html='<div class="sectionhead"><h2>Catatan untuk bulan depan</h2><button class="btn ghost" type="button" id="copyPlan">Salin ringkasan</button></div>';
   html+='<ul class="adv">'+adv.map(function(a){return '<li><span class="lv'+(a.lv==='bad'?' bad':'')+'">'+LV[a.lv]+'</span><div><b>'+esc(a.t)+'</b><p>'+esc(a.x)+'</p></div></li>';}).join('')+'</ul>';
   if(limits){
@@ -616,7 +637,7 @@ function renderSumBottom(c,prev,key){
     (prev&&prev.expense>0?'<div><dt>Dibanding '+esc(monthName(shiftMonth(key,-1)))+'</dt><dd class="num">'+(c.expense>=prev.expense?'+':'-')+idr(Math.abs(c.expense-prev.expense)).replace('-','')+'</dd></div>':'')+
     '</dl>';
   html+='<h3 class="gap">Tiga pengeluaran terbesar</h3><ul class="rows" style="margin-top:8px">'+c.big.map(function(t){
-    return '<li class="row"><span class="sq" style="background:var('+CATS[t.cat].v+')"></span><span class="what">'+esc(t.note||CATS[t.cat].label)+'</span><span class="amt">'+num(t.amount)+'</span><span class="meta">'+CATS[t.cat].label+' · '+esc(shortDate(t.date))+'</span></li>';
+    return '<li class="row"><span class="sq" style="background:var('+catVar(t)+')"></span><span class="what">'+esc(t.note||catLabel(t))+'</span><span class="amt">'+num(t.amount)+'</span><span class="meta">'+catLabel(t)+' · '+esc(shortDate(t.date))+'</span></li>';
   }).join('')+'</ul>';
   el.innerHTML=html;
 }
@@ -649,7 +670,50 @@ function render(){
   Array.prototype.forEach.call(document.querySelectorAll('#chips .chip'),function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===S.filter));});
   Array.prototype.forEach.call(document.querySelectorAll('#mchips .chip'),function(b){b.setAttribute('aria-pressed',String(b.dataset.mfilter===S.mfilter));});
   renderStrip(c);renderHistory();renderSumTop(c,key);renderSumBottom(c,prev,key);
-  applyTabs();
+  applyTabs();syncReflect();
+}
+
+/* ---------- refleksi ---------- */
+var rTimers={};
+function syncReflect(){
+  var key=S.month,v=S.reflect[key]||{};
+  $('reflectTitle').textContent='Refleksi '+monthLabel(key);
+  ['good','fix','goal'].forEach(function(f){var el=$('r-'+f);if(document.activeElement!==el&&el.value!==(v[f]||''))el.value=v[f]||'';});
+  var pk=shiftMonth(key,-1),pv=S.reflect[pk],pe=$('reflectPrev');
+  if(pv&&pv.goal&&pv.goal.trim()){pe.hidden=false;pe.textContent='Targetmu dari '+monthName(pk)+': '+pv.goal.trim();}else{pe.hidden=true;pe.textContent='';}
+}
+function saveReflect(){
+  var key=S.month,v={good:$('r-good').value,fix:$('r-fix').value,goal:$('r-goal').value};
+  S.reflect[key]=v;
+  $('reflectSaved').textContent='Menyimpan';
+  clearTimeout(rTimers[key]);
+  rTimers[key]=setTimeout(async function(){
+    try{
+      if(S.mode==='db')await S.col.doc('reflect-'+key).set(v);else saveLocal();
+      $('reflectSaved').textContent='Tersimpan';
+    }catch(e){$('reflectSaved').textContent='';toast(errMsg(e));}
+  },700);
+}
+function fillReflect(){
+  var adv=S.lastAdv,lim=S.lastLimits;
+  if(!adv){toast('Belum ada pengeluaran di bulan ini untuk dibuatkan saran.');return;}
+  var filled=0;
+  var put=function(f,text){var el=$('r-'+f);if(text&&!el.value.trim()){el.value=text;filled++;}};
+  put('good',adv.filter(function(a){return a.lv==='ok';}).map(function(a){return '- '+a.t+'. '+a.x;}).join('\n'));
+  put('fix',adv.filter(function(a){return a.lv==='bad'||a.lv==='warn'||a.lv==='info';}).map(function(a){return '- '+a.t+'. '+a.x;}).join('\n'));
+  if(lim)put('goal',lim.rows.map(function(r){return '- '+r.label+' maksimal '+idr(r.limit);}).join('\n')+'\n- Ditabung atau sisa minimal '+idr(lim.rest));
+  if(filled){saveReflect();toast('Saran dimasukkan. Ubah sesuai keinginanmu.');}
+  else toast('Kolom yang kosong sudah terisi semua. Kosongkan dulu kalau mau diganti.');
+}
+function copyText(){
+  var t=S.plan||'',rf=S.reflect[S.month];
+  if(rf&&(rf.good||rf.fix||rf.goal)){
+    t+=(t?'\n\n':'')+'Refleksi '+monthLabel(S.month)+':';
+    if(rf.good)t+='\nBerjalan baik: '+rf.good;
+    if(rf.fix)t+='\nPerlu diperbaiki: '+rf.fix;
+    if(rf.goal)t+='\nTarget bulan depan: '+rf.goal;
+  }
+  return t;
 }
 
 /* ---------- form ---------- */
@@ -728,7 +792,7 @@ async function exportXlsx(){
   var keys={};
   list.forEach(function(t){
     var code=Number(t.date.slice(0,4)+t.date.slice(5,7));keys[t.date.slice(0,7)]=code;
-    rows.push([t.date,parse(t.date).toLocaleDateString('id-ID',{weekday:'long'}),code,t.type==='in'?'Pemasukan':'Pengeluaran',t.type==='in'?'Pemasukan':CATS[t.cat].label,t.note||'',t.amount,METHODS[t.method]||METHODS.tunai]);
+    rows.push([t.date,parse(t.date).toLocaleDateString('id-ID',{weekday:'long'}),code,t.type==='in'?'Pemasukan':'Pengeluaran',catLabel(t),t.note||'',t.amount,METHODS[t.method]||METHODS.tunai]);
   });
   var n=rows.length;
   var ws=XLSX.utils.aoa_to_sheet(rows);
@@ -737,13 +801,13 @@ async function exportXlsx(){
   for(var r=2;r<=n;r++){if(ws['G'+r])ws['G'+r].z='#,##0';}
   var rg=function(col){return 'Transaksi!$'+col+'$2:$'+col+'$'+n;};
   var months=Object.keys(keys).sort();
-  var srows=[['Bulan','Kode bulan','Pemasukan','Pokok','Gaya Hidup','Kewajiban','Total pengeluaran','Sisa','Tunai','E-wallet','BRI','Sinarmas']];
+  var srows=[['Bulan','Kode bulan','Pemasukan','Pokok','Gaya Hidup','Kewajiban','Total pengeluaran','Sisa','Tunai','E-wallet','BRI','Sinarmas','Tanpa kategori']];
   months.forEach(function(k){
     var c=compute(S.tx,k);
-    srows.push([monthLabel(k),keys[k],c.income,c.by.pokok,c.by.gaya,c.by.kewajiban,c.expense,c.income-c.expense,c.byM.tunai,c.byM.ewallet,c.byM.bri,c.byM.sinarmas]);
+    srows.push([monthLabel(k),keys[k],c.income,c.by.pokok,c.by.gaya,c.by.kewajiban,c.expense,c.income-c.expense,c.byM.tunai,c.byM.ewallet,c.byM.bri,c.byM.sinarmas,c.unc]);
   });
   var ws2=XLSX.utils.aoa_to_sheet(srows);
-  ws2['!cols']=[{wch:16},{wch:11},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12}];
+  ws2['!cols']=[{wch:16},{wch:11},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:15}];
   months.forEach(function(k,i){
     var r=i+2;
     var put=function(col,f){var cell=ws2[col+r];if(cell){cell.f=f;cell.z='#,##0';}};
@@ -751,8 +815,9 @@ async function exportXlsx(){
     ['D','E','F'].forEach(function(col){
       put(col,'SUMIFS('+rg('G')+','+rg('C')+',$B'+r+','+rg('D')+',"Pengeluaran",'+rg('E')+','+col+'$1)');
     });
-    put('G','SUM(D'+r+':F'+r+')');
+    put('G','SUM(D'+r+':F'+r+')+M'+r);
     put('H','C'+r+'-G'+r);
+    put('M','SUMIFS('+rg('G')+','+rg('C')+',$B'+r+','+rg('D')+',"Pengeluaran",'+rg('E')+',M$1)');
     ['I','J','K','L'].forEach(function(col){
       put(col,'SUMIFS('+rg('G')+','+rg('C')+',$B'+r+','+rg('D')+',"Pengeluaran",'+rg('H')+','+col+'$1)');
     });
@@ -760,6 +825,13 @@ async function exportXlsx(){
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Transaksi');
   XLSX.utils.book_append_sheet(wb,ws2,'Ringkasan');
+  var rk=Object.keys(S.reflect).filter(function(k){var v=S.reflect[k];return v&&(v.good||v.fix||v.goal);}).sort();
+  if(rk.length){
+    var rrows=[['Bulan','Kode bulan','Berjalan baik','Perlu diperbaiki','Target bulan depan']];
+    rk.forEach(function(k){var v=S.reflect[k];rrows.push([monthLabel(k),Number(k.replace('-','')),v.good||'',v.fix||'',v.goal||'']);});
+    var ws3=XLSX.utils.aoa_to_sheet(rrows);ws3['!cols']=[{wch:16},{wch:11},{wch:44},{wch:44},{wch:44}];
+    XLSX.utils.book_append_sheet(wb,ws3,'Refleksi');
+  }
   try{
     var b64=XLSX.write(wb,{bookType:'xlsx',type:'base64'});
     var name='buku-kas-harian-'+ymd(new Date())+'.xlsx';
@@ -796,7 +868,7 @@ function parseDateCell(v){
 async function importXlsx(buf){
   var wb=XLSX.read(buf,{type:'array'});
   var ws=wb.Sheets['Transaksi']||wb.Sheets[wb.SheetNames[0]];
-  var res={added:0,skipped:0,dup:0,last:''};
+  var res={added:0,skipped:0,dup:0,last:'',refl:0};
   if(!ws)return res;
   var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
   var catMap={'pokok':'pokok','gaya hidup':'gaya','gaya':'gaya','kewajiban':'kewajiban'};
@@ -810,13 +882,32 @@ async function importXlsx(buf){
     var type=jenis==='pemasukan'?'in':(jenis==='pengeluaran'?'out':null);
     var raw=r['nominal'];
     var amount=typeof raw==='number'?Math.round(raw):parseInt(String(raw).replace(/\D/g,''),10);
-    var cat=type==='out'?(catMap[normKey(r['kategori'])]||null):null;
-    if(!date||!type||!amount||amount<=0||(type==='out'&&!cat)){res.skipped++;continue;}
+    var kraw=normKey(r['kategori']),cat=null,badcat=false;
+    if(type==='out'&&kraw&&kraw!=='tanpa kategori'){cat=catMap[kraw]||null;if(!cat)badcat=true;}
+    if(!date||!type||!amount||amount<=0||badcat){res.skipped++;continue;}
     var tx={id:newId(),date:date,type:type,cat:cat,amount:amount,note:String(r['catatan']==null?'':r['catatan']).trim().slice(0,80),method:metMap[normKey(r['metode'])]||'tunai',ts:Date.now()+i};
     var key=sig(tx);seen[key]=(seen[key]||0)+1;
     if(seen[key]<=(have[key]||0)){res.dup++;continue;}
     await persistTx(tx);
     res.added++;if(date>res.last)res.last=date;
+  }
+  var wr=wb.Sheets['Refleksi'];
+  if(wr){
+    var rr=XLSX.utils.sheet_to_json(wr,{defval:''});
+    for(var j=0;j<rr.length;j++){
+      var q={};Object.keys(rr[j]).forEach(function(k){q[normKey(k)]=rr[j][k];});
+      var code=String(q['kode bulan']==null?'':q['kode bulan']).replace(/\D/g,'');
+      if(code.length!==6)continue;
+      var mk=code.slice(0,4)+'-'+code.slice(4);
+      var cur=S.reflect[mk]||{};
+      if(cur.good||cur.fix||cur.goal)continue;
+      var nv={good:String(q['berjalan baik']||'').slice(0,600),fix:String(q['perlu diperbaiki']||'').slice(0,600),goal:String(q['target bulan depan']||'').slice(0,600)};
+      if(!(nv.good||nv.fix||nv.goal))continue;
+      S.reflect[mk]=nv;
+      if(S.mode==='db')await S.col.doc('reflect-'+mk).set(nv);
+      res.refl++;
+    }
+    if(res.refl&&S.mode!=='db')saveLocal();
   }
   return res;
 }
@@ -830,7 +921,10 @@ $('importFile').addEventListener('change',async function(){
     var r=await importXlsx(buf);
     if(r.added){S.sampleOff=true;S.month=r.last.slice(0,7);S.filter='all';S.mfilter='all';}
     render();
-    toast(r.added?('Diimpor '+r.added+' transaksi'+(r.dup?', '+r.dup+' sudah ada':'')+(r.skipped?', '+r.skipped+' dilewati':'')):(r.dup?'Semua transaksi di file itu sudah ada.':'Tidak ada transaksi yang bisa dibaca dari file ini.'));
+    var parts=[];
+    if(r.added)parts.push('Diimpor '+r.added+' transaksi'+(r.dup?', '+r.dup+' sudah ada':'')+(r.skipped?', '+r.skipped+' dilewati':''));
+    if(r.refl)parts.push((parts.length?'':'Diimpor ')+r.refl+' catatan refleksi');
+    toast(parts.length?parts.join(', '):(r.dup?'Semua transaksi di file itu sudah ada.':'Tidak ada transaksi yang bisa dibaca dari file ini.'));
   }catch(ex){toast('File tidak bisa dibaca. Pakai file Excel hasil Unduh Excel.');}
 });
 
@@ -854,12 +948,14 @@ document.addEventListener('click',async function(e){
     return;
   }
   if(b.id==='exportXlsx'){exportXlsx();return;}
+  if(b.id==='reflectFill'){fillReflect();return;}
   if(b.id==='importXlsx'){$('importFile').click();return;}
   if(b.id==='copyPlan'){
-    try{await navigator.clipboard.writeText(S.plan);toast('Ringkasan disalin');}
-    catch(ex){var ta=$('copyFallback');ta.value=S.plan;ta.hidden=false;ta.focus();ta.select();}
+    try{await navigator.clipboard.writeText(copyText());toast('Ringkasan disalin');}
+    catch(ex){var ta=$('copyFallback');ta.value=copyText();ta.hidden=false;ta.focus();ta.select();}
   }
 });
+['r-good','r-fix','r-goal'].forEach(function(id){$(id).addEventListener('input',saveReflect);});
 $('prevMonth').addEventListener('click',function(){S.month=shiftMonth(S.month,-1);render();});
 $('nextMonth').addEventListener('click',function(){S.month=shiftMonth(S.month,1);render();});
 ORDER.forEach(function(k){
