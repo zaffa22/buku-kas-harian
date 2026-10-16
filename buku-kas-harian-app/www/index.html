@@ -113,7 +113,13 @@ form{display:flex;flex-direction:column;gap:16px}
 .linkbtn.armed{color:var(--bad);font-weight:700}
 .note{font-size:.75rem;color:var(--muted)}
 
+.methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(86px,1fr));gap:8px}
+.methods label{position:relative;display:block}
+.methods span{display:flex;align-items:center;justify-content:center;min-height:44px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--bg);font-weight:600;cursor:pointer;text-align:center}
+.methods input:checked+span{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.methods input:focus-visible+span{outline:2px solid var(--focus);outline-offset:2px}
 /* history */
+.chips+.chips{margin-block:4px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-block:12px 4px}
 .chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:6px 12px;min-height:34px;font-size:.8125rem;font-weight:600;cursor:pointer;color:var(--muted)}
 .chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -227,6 +233,16 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
           </div>
         </fieldset>
 
+        <fieldset class="field">
+          <legend id="methodLegend">Dibayar lewat</legend>
+          <div class="methods">
+            <label><input class="sr" type="radio" name="method" value="tunai" checked><span>Tunai</span></label>
+            <label><input class="sr" type="radio" name="method" value="ewallet"><span>E-wallet</span></label>
+            <label><input class="sr" type="radio" name="method" value="bri"><span>Bank BRI</span></label>
+            <label><input class="sr" type="radio" name="method" value="sinarmas"><span>Bank Sinarmas</span></label>
+          </div>
+        </fieldset>
+
         <div class="field">
           <label for="amount">Nominal</label>
           <div class="money"><span>Rp</span><input class="input" id="amount" inputmode="numeric" autocomplete="off" placeholder="0"></div>
@@ -255,6 +271,13 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
           <button class="chip" type="button" data-filter="gaya" aria-pressed="false">Gaya Hidup</button>
           <button class="chip" type="button" data-filter="kewajiban" aria-pressed="false">Kewajiban</button>
           <button class="chip" type="button" data-filter="in" aria-pressed="false">Pemasukan</button>
+        </div>
+        <div class="chips" id="mchips" role="group" aria-label="Saring metode">
+          <button class="chip" type="button" data-mfilter="all" aria-pressed="true">Semua metode</button>
+          <button class="chip" type="button" data-mfilter="tunai" aria-pressed="false">Tunai</button>
+          <button class="chip" type="button" data-mfilter="ewallet" aria-pressed="false">E-wallet</button>
+          <button class="chip" type="button" data-mfilter="bri" aria-pressed="false">BRI</button>
+          <button class="chip" type="button" data-mfilter="sinarmas" aria-pressed="false">Sinarmas</button>
         </div>
         <div id="history"></div>
       </section>
@@ -292,6 +315,8 @@ var CATS={
   kewajiban:{label:'Kewajiban',v:'--kew'}
 };
 var ORDER=['pokok','gaya','kewajiban'];
+var METHODS={tunai:'Tunai',ewallet:'E-wallet',bri:'BRI',sinarmas:'Sinarmas'};
+var MORDER=['tunai','ewallet','bri','sinarmas'];
 var DEF_T={pokok:50,gaya:20,kewajiban:20};
 var $=function(id){return document.getElementById(id);};
 var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
@@ -310,7 +335,7 @@ var shiftMonth=function(k,n){var p=k.split('-').map(Number);return monthKey(new 
 var longDate=function(s){return parse(s).toLocaleDateString('id-ID',{weekday:'long',day:'numeric',month:'long',year:'numeric'});};
 var shortDate=function(s){return parse(s).toLocaleDateString('id-ID',{weekday:'short',day:'numeric',month:'short'});};
 
-var S={tx:[],targets:Object.assign({},DEF_T),month:monthKey(new Date()),tab:'catat',filter:'all',editing:null,armed:null,mode:'pending',col:null,sampleOff:false,plan:''};
+var S={tx:[],targets:Object.assign({},DEF_T),month:monthKey(new Date()),tab:'catat',filter:'all',mfilter:'all',editing:null,armed:null,mode:'pending',col:null,sampleOff:false,plan:''};
 var sampleCache=null;
 
 function sampleTx(){
@@ -337,7 +362,7 @@ function sampleTx(){
     [13,'out','pokok',25000,'Makan siang']
   ];
   sampleCache=rows.filter(function(r){return r[0]<=last;}).map(function(r,i){
-    return {id:'s'+i,date:k+'-'+pad(r[0]),type:r[1],cat:r[2],amount:r[3],note:r[4],ts:i,sample:true};
+    return {id:'s'+i,date:k+'-'+pad(r[0]),type:r[1],cat:r[2],amount:r[3],note:r[4],ts:i,sample:true,method:r[1]==='in'?'bri':['tunai','ewallet','bri'][i%3]};
   });
   return sampleCache;
 }
@@ -409,9 +434,10 @@ function compute(list,key){
   var m=list.filter(function(t){return t.date.slice(0,7)===key;});
   var out=m.filter(function(t){return t.type==='out';});
   var inn=m.filter(function(t){return t.type==='in';});
-  var by={pokok:0,gaya:0,kewajiban:0},top={};
+  var by={pokok:0,gaya:0,kewajiban:0},top={},byM={tunai:0,ewallet:0,bri:0,sinarmas:0};
   out.forEach(function(t){
     if(t.cat in by){by[t.cat]+=t.amount;if(!top[t.cat]||t.amount>top[t.cat].amount)top[t.cat]=t;}
+    byM[(t.method in byM)?t.method:'tunai']+=t.amount;
   });
   var perDay={},weekend=0,days={};
   m.forEach(function(t){days[t.date]=1;});
@@ -423,7 +449,7 @@ function compute(list,key){
   Object.keys(perDay).forEach(function(d){if(!busiest||perDay[d]>busiest.amount)busiest={date:d,amount:perDay[d]};});
   var small=out.filter(function(t){return t.amount<30000;});
   var big=out.slice().sort(function(a,b){return b.amount-a.amount;}).slice(0,3);
-  return {out:out,income:sum(inn),expense:sum(out),by:by,top:top,daysLogged:Object.keys(days).length,busiest:busiest,weekend:weekend,small:{n:small.length,sum:sum(small)},big:big,count:out.length};
+  return {out:out,income:sum(inn),expense:sum(out),by:by,byM:byM,top:top,daysLogged:Object.keys(days).length,busiest:busiest,weekend:weekend,small:{n:small.length,sum:sum(small)},big:big,count:out.length};
 }
 function elapsedDays(key){
   var now=new Date(),cur=monthKey(now),p=key.split('-').map(Number);
@@ -494,6 +520,7 @@ function renderHistory(){
   var key=S.month,list=effective().filter(function(t){return t.date.slice(0,7)===key;});
   if(S.filter==='in')list=list.filter(function(t){return t.type==='in';});
   else if(S.filter!=='all')list=list.filter(function(t){return t.type==='out'&&t.cat===S.filter;});
+  if(S.mfilter!=='all')list=list.filter(function(t){return (t.method||'tunai')===S.mfilter;});
   var el=$('history');
   if(!list.length){el.innerHTML='<p class="empty">Belum ada transaksi'+(S.filter==='all'?'':' pada filter ini')+' di '+esc(monthLabel(key))+'.</p>';return;}
   var groups={};
@@ -514,7 +541,7 @@ function renderHistory(){
       return '<li class="row"><span class="sq" style="background:var('+color+')"></span>'+
         '<span class="what">'+esc(t.note||cl)+'</span>'+
         '<span class="amt'+(isIn?' in':'')+'">'+(isIn?'+':'')+num(t.amount)+'</span>'+
-        '<span class="meta"><span>'+cl+'</span>'+acts+'</span></li>';
+        '<span class="meta"><span>'+cl+' · '+(METHODS[t.method]||METHODS.tunai)+'</span>'+acts+'</span></li>';
     }).join('');
     return '<div class="day"><div class="dayhead"><b>'+esc(shortDate(d))+'</b><span class="num muted">'+(o?'keluar '+num(o):'')+'</span></div><ul class="rows">'+rows+'</ul></div>';
   }).join('');
@@ -577,6 +604,8 @@ function renderSumBottom(c,prev,key){
       '<tr><td>Ditabung atau sisa</td><td class="r num">'+num(Math.max(0,c.income-c.expense))+'</td><td class="r num">min. '+num(limits.rest)+'</td></tr></tbody></table></div>';
   }
   var el2=elapsedDays(key);
+  html+='<h3 class="gap">Pengeluaran per metode</h3><div class="tablewrap"><table><thead><tr><th>Metode</th><th class="r">Jumlah</th><th class="r">Porsi</th></tr></thead><tbody>'+
+    MORDER.map(function(k){return '<tr><td>'+METHODS[k]+'</td><td class="r num">'+num(c.byM[k])+'</td><td class="r num">'+pct(c.byM[k],c.expense)+'%</td></tr>';}).join('')+'</tbody></table></div>';
   html+='<h3 class="gap">Angka lain</h3><dl class="facts">'+
     '<div><dt>Jumlah pengeluaran</dt><dd class="num">'+c.count+' transaksi</dd></div>'+
     '<div><dt>Hari tercatat</dt><dd class="num">'+c.daysLogged+(el2?' dari '+el2:'')+' hari</dd></div>'+
@@ -617,6 +646,7 @@ function render(){
   $('saveBtn').textContent=pending?'Menyiapkan penyimpanan':(S.editing?'Simpan perubahan':(form.elements.type.value==='in'?'Simpan pemasukan':'Simpan pengeluaran'));
   $('storeNote').textContent=S.mode==='db'?'Tersimpan di akunmu dan hanya bisa dilihat olehmu.':(S.mode==='local'?'Data tersimpan di HP ini. Unduh Excel secara berkala sebagai cadangan.':'');
   Array.prototype.forEach.call(document.querySelectorAll('#chips .chip'),function(b){b.setAttribute('aria-pressed',String(b.dataset.filter===S.filter));});
+  Array.prototype.forEach.call(document.querySelectorAll('#mchips .chip'),function(b){b.setAttribute('aria-pressed',String(b.dataset.mfilter===S.mfilter));});
   renderStrip(c);renderHistory();renderSumTop(c,key);renderSumBottom(c,prev,key);
   applyTabs();
 }
@@ -626,6 +656,7 @@ var form=$('form');
 function setType(t){
   var r=form.querySelector('input[name="type"][value="'+t+'"]');if(r)r.checked=true;
   $('catField').hidden=t==='in';
+  $('methodLegend').textContent=t==='in'?'Masuk ke':'Dibayar lewat';
 }
 function updateDateLabel(){var v=$('date').value;$('dateLabel').textContent=v?longDate(v):'';}
 function resetForm(keepDate){
@@ -641,6 +672,7 @@ function startEdit(id){
   $('date').value=t.date;updateDateLabel();
   if(t.cat){var r=form.querySelector('input[name="cat"][value="'+t.cat+'"]');if(r)r.checked=true;}
   $('amount').value=nf.format(t.amount);$('note').value=t.note||'';
+  var mr=form.querySelector('input[name="method"][value="'+(t.method||'tunai')+'"]');if(mr)mr.checked=true;
   $('formTitle').textContent='Ubah transaksi';$('cancelEdit').hidden=false;$('formError').textContent='';
   S.tab='catat';render();
   $('panel-catat').scrollIntoView({block:'start'});
@@ -663,7 +695,7 @@ form.addEventListener('submit',async function(e){
   if(!amount){err.textContent='Isi nominal lebih dari 0.';$('amount').focus();return;}
   if(type==='out'&&!cat){err.textContent='Pilih kategori: Pokok, Gaya Hidup, atau Kewajiban.';return;}
   var prev=S.editing?S.tx.find(function(t){return t.id===S.editing;}):null;
-  var tx={id:prev?prev.id:newId(),date:date,type:type,cat:cat,amount:amount,note:note,ts:prev?prev.ts:Date.now()};
+  var tx={id:prev?prev.id:newId(),date:date,type:type,cat:cat,amount:amount,note:note,method:form.elements.method.value||'tunai',ts:prev?prev.ts:Date.now()};
   var btn=$('saveBtn');btn.disabled=true;
   try{
     await persistTx(tx);
@@ -691,26 +723,26 @@ async function exportXlsx(){
   if(!list.length){toast('Belum ada transaksi tersimpan untuk diunduh.');return;}
   if(!window.XLSX){toast('Pustaka Excel gagal dimuat. Muat ulang halaman lalu coba lagi.');return;}
   list.sort(function(a,b){return a.date<b.date?-1:(a.date>b.date?1:(a.ts||0)-(b.ts||0));});
-  var rows=[['Tanggal','Hari','Kode bulan','Jenis','Kategori','Catatan','Nominal']];
+  var rows=[['Tanggal','Hari','Kode bulan','Jenis','Kategori','Catatan','Nominal','Metode']];
   var keys={};
   list.forEach(function(t){
     var code=Number(t.date.slice(0,4)+t.date.slice(5,7));keys[t.date.slice(0,7)]=code;
-    rows.push([t.date,parse(t.date).toLocaleDateString('id-ID',{weekday:'long'}),code,t.type==='in'?'Pemasukan':'Pengeluaran',t.type==='in'?'Pemasukan':CATS[t.cat].label,t.note||'',t.amount]);
+    rows.push([t.date,parse(t.date).toLocaleDateString('id-ID',{weekday:'long'}),code,t.type==='in'?'Pemasukan':'Pengeluaran',t.type==='in'?'Pemasukan':CATS[t.cat].label,t.note||'',t.amount,METHODS[t.method]||METHODS.tunai]);
   });
   var n=rows.length;
   var ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:12},{wch:10},{wch:11},{wch:12},{wch:12},{wch:34},{wch:14}];
-  ws['!autofilter']={ref:'A1:G'+n};
+  ws['!cols']=[{wch:12},{wch:10},{wch:11},{wch:12},{wch:12},{wch:34},{wch:14},{wch:12}];
+  ws['!autofilter']={ref:'A1:H'+n};
   for(var r=2;r<=n;r++){if(ws['G'+r])ws['G'+r].z='#,##0';}
   var rg=function(col){return 'Transaksi!$'+col+'$2:$'+col+'$'+n;};
   var months=Object.keys(keys).sort();
-  var srows=[['Bulan','Kode bulan','Pemasukan','Pokok','Gaya Hidup','Kewajiban','Total pengeluaran','Sisa']];
+  var srows=[['Bulan','Kode bulan','Pemasukan','Pokok','Gaya Hidup','Kewajiban','Total pengeluaran','Sisa','Tunai','E-wallet','BRI','Sinarmas']];
   months.forEach(function(k){
     var c=compute(S.tx,k);
-    srows.push([monthLabel(k),keys[k],c.income,c.by.pokok,c.by.gaya,c.by.kewajiban,c.expense,c.income-c.expense]);
+    srows.push([monthLabel(k),keys[k],c.income,c.by.pokok,c.by.gaya,c.by.kewajiban,c.expense,c.income-c.expense,c.byM.tunai,c.byM.ewallet,c.byM.bri,c.byM.sinarmas]);
   });
   var ws2=XLSX.utils.aoa_to_sheet(srows);
-  ws2['!cols']=[{wch:16},{wch:11},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:14}];
+  ws2['!cols']=[{wch:16},{wch:11},{wch:14},{wch:14},{wch:14},{wch:14},{wch:18},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12}];
   months.forEach(function(k,i){
     var r=i+2;
     var put=function(col,f){var cell=ws2[col+r];if(cell){cell.f=f;cell.z='#,##0';}};
@@ -720,6 +752,9 @@ async function exportXlsx(){
     });
     put('G','SUM(D'+r+':F'+r+')');
     put('H','C'+r+'-G'+r);
+    ['I','J','K','L'].forEach(function(col){
+      put(col,'SUMIFS('+rg('G')+','+rg('C')+',$B'+r+','+rg('D')+',"Pengeluaran",'+rg('H')+','+col+'$1)');
+    });
   });
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Transaksi');
@@ -747,6 +782,7 @@ document.addEventListener('click',async function(e){
   var b=e.target.closest('button');if(!b)return;
   if(b.dataset.tab){S.tab=b.dataset.tab;applyTabs();return;}
   if(b.dataset.filter){S.filter=b.dataset.filter;render();return;}
+  if(b.dataset.mfilter){S.mfilter=b.dataset.mfilter;render();return;}
   if(b.dataset.act==='edit'){startEdit(b.dataset.id);return;}
   if(b.dataset.act==='del'){
     var id=b.dataset.id;
