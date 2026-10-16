@@ -264,7 +264,8 @@ th.r,td.r{text-align:right;padding-right:0;padding-left:8px}
 
     <div class="main">
       <section class="panel" id="panel-riwayat" role="tabpanel" aria-labelledby="tab-riwayat" hidden>
-        <div class="sectionhead"><h2>Riwayat transaksi</h2><button class="btn ghost" type="button" id="exportXlsx">Unduh Excel</button></div>
+        <div class="sectionhead"><h2>Riwayat transaksi</h2><div class="actions"><button class="btn ghost" type="button" id="importXlsx">Impor Excel</button><button class="btn ghost" type="button" id="exportXlsx">Unduh Excel</button></div>
+        <input type="file" id="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></div>
         <div class="chips" id="chips" role="group" aria-label="Saring kategori">
           <button class="chip" type="button" data-filter="all" aria-pressed="true">Semua</button>
           <button class="chip" type="button" data-filter="pokok" aria-pressed="false">Pokok</button>
@@ -777,6 +778,62 @@ async function exportXlsx(){
   }
 }
 
+/* ---------- impor Excel ---------- */
+function normKey(s){return String(s==null?'':s).trim().toLowerCase();}
+function sig(t){return [t.date,t.type,t.cat||'',t.amount,t.note||'',t.method||'tunai'].join('|');}
+function parseDateCell(v){
+  var out=null,m;
+  if(v instanceof Date&&!isNaN(v)){out=v.getFullYear()+'-'+pad(v.getMonth()+1)+'-'+pad(v.getDate());}
+  else if(typeof v==='number'&&v>20000&&v<80000){var d=new Date(Math.round((v-25569)*86400000));out=d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate());}
+  else{
+    var s=String(v==null?'':v).trim();
+    if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)))out=m[1]+'-'+pad(+m[2])+'-'+pad(+m[3]);
+    else if((m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/)))out=m[3]+'-'+pad(+m[2])+'-'+pad(+m[1]);
+  }
+  if(!out||ymd(parse(out))!==out)return null;
+  return out;
+}
+async function importXlsx(buf){
+  var wb=XLSX.read(buf,{type:'array'});
+  var ws=wb.Sheets['Transaksi']||wb.Sheets[wb.SheetNames[0]];
+  var res={added:0,skipped:0,dup:0,last:''};
+  if(!ws)return res;
+  var rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+  var catMap={'pokok':'pokok','gaya hidup':'gaya','gaya':'gaya','kewajiban':'kewajiban'};
+  var metMap={'tunai':'tunai','e-wallet':'ewallet','ewallet':'ewallet','bri':'bri','sinarmas':'sinarmas'};
+  var have={},seen={};
+  S.tx.forEach(function(t){var k=sig(t);have[k]=(have[k]||0)+1;});
+  for(var i=0;i<rows.length;i++){
+    var r={};Object.keys(rows[i]).forEach(function(k){r[normKey(k)]=rows[i][k];});
+    var date=parseDateCell(r['tanggal']);
+    var jenis=normKey(r['jenis']);
+    var type=jenis==='pemasukan'?'in':(jenis==='pengeluaran'?'out':null);
+    var raw=r['nominal'];
+    var amount=typeof raw==='number'?Math.round(raw):parseInt(String(raw).replace(/\D/g,''),10);
+    var cat=type==='out'?(catMap[normKey(r['kategori'])]||null):null;
+    if(!date||!type||!amount||amount<=0||(type==='out'&&!cat)){res.skipped++;continue;}
+    var tx={id:newId(),date:date,type:type,cat:cat,amount:amount,note:String(r['catatan']==null?'':r['catatan']).trim().slice(0,80),method:metMap[normKey(r['metode'])]||'tunai',ts:Date.now()+i};
+    var key=sig(tx);seen[key]=(seen[key]||0)+1;
+    if(seen[key]<=(have[key]||0)){res.dup++;continue;}
+    await persistTx(tx);
+    res.added++;if(date>res.last)res.last=date;
+  }
+  return res;
+}
+$('importFile').addEventListener('change',async function(){
+  var f=this.files&&this.files[0];
+  try{this.value='';}catch(e){}
+  if(!f)return;
+  if(!window.XLSX){toast('Pustaka Excel gagal dimuat. Muat ulang halaman lalu coba lagi.');return;}
+  try{
+    var buf=await new Promise(function(ok,no){var fr=new FileReader();fr.onload=function(){ok(fr.result);};fr.onerror=function(){no(fr.error);};fr.readAsArrayBuffer(f);});
+    var r=await importXlsx(buf);
+    if(r.added){S.sampleOff=true;S.month=r.last.slice(0,7);S.filter='all';S.mfilter='all';}
+    render();
+    toast(r.added?('Diimpor '+r.added+' transaksi'+(r.dup?', '+r.dup+' sudah ada':'')+(r.skipped?', '+r.skipped+' dilewati':'')):(r.dup?'Semua transaksi di file itu sudah ada.':'Tidak ada transaksi yang bisa dibaca dari file ini.'));
+  }catch(ex){toast('File tidak bisa dibaca. Pakai file Excel hasil Unduh Excel.');}
+});
+
 /* ---------- aksi lain ---------- */
 document.addEventListener('click',async function(e){
   var b=e.target.closest('button');if(!b)return;
@@ -797,6 +854,7 @@ document.addEventListener('click',async function(e){
     return;
   }
   if(b.id==='exportXlsx'){exportXlsx();return;}
+  if(b.id==='importXlsx'){$('importFile').click();return;}
   if(b.id==='copyPlan'){
     try{await navigator.clipboard.writeText(S.plan);toast('Ringkasan disalin');}
     catch(ex){var ta=$('copyFallback');ta.value=S.plan;ta.hidden=false;ta.focus();ta.select();}
